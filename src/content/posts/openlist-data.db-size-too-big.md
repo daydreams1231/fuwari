@@ -6,7 +6,7 @@ image: ''
 tags: [Alist, Openlist]
 category: '教程'
 draft: false 
-lang: ''
+lang: 'zh_CN'
 ---
 
 如果你的环境没有Python, 请将data.db文件复制到任意有python环境的地方 <br>
@@ -20,7 +20,7 @@ cursor = conn.cursor()
 
 cursor.execute("VACUUM")
 
-# 关闭连接
+# 关闭sql连接
 cursor.close()
 conn.close()
 ```

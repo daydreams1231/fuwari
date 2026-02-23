@@ -1,7 +1,7 @@
 ---
 title: rk3588嵌入式学习
 published: 2026-01-10
-description: '以Rock5B为例, 学习arm64嵌入式开发'
+description: '以Radxa Rock5B为例, 学习arm64嵌入式开发'
 image: ''
 tags: [arm, Linux, rockchip, uboot, kernel]
 category: ''
