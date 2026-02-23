@@ -21,33 +21,172 @@ lang: ''
 前者是瑞芯微开发必备的驱动, 后者是瑞芯微开发工具, 可用于刷系统, 救砖等等操作. <br>
 如果你以前捡过一些瑞芯微的arm板子, 如OEC-T、各种基于rk3399的工控板, 对这个应该不陌生 <br>
 
-# 概念及Q&A
-## 启动流程
+# 概念及 Q&A
+## 启动流程及优先级
 [瑞芯微启动流程](https://opensource.rock-chips.com/wiki_Boot_option#Boot_flow). <br>
-芯片上电 -> 运行芯片内部MaskRom(Boot rom) ->  
+[ophub Discussions](https://github.com/ophub/amlogic-s9xxx-armbian/discussions/1634) <br>
+[FriendlyElecWiki](https://wiki.friendlyelec.com/wiki/index.php?title=Template:RockchipBootPriority/zh&redirect=no) <br>
+芯片上电 -> 运行芯片内部MaskRom(Boot rom) -> Loader1区域(bl2) -> Loader2区域(bl33) -> boot.img -> rootfs <br>
+简化一下就是 bootrom -> SPL -> uboot <br>
+除去Maskrom阶段, 后面的步骤都是在芯片外部的存储介质上进行的, 如SPI-NOR Flash, EMMC, SD/TF <br>
+
+Loader1区域: idbloader.img, 分为传统的ubootSPL/TPL或者瑞芯微官方的miniloader, 这个阶段一般用来初始化外设, 在瑞芯微中, TPL负责初始化内存 <br>
+Loader2区域: uboot.itb, 真正的uboot程序在此运行 <br>
+
+> 实际上, 真正的启动顺序是 maskrom -> tpl -> maskrom -> spl
+
+优先级(从上至下): <br>
+  - SPI NOR
+  - SPI NAND
+  - EMMC
+  - MMC device (sd/tf card)
+Boot Rom结束后, 进入bl2阶段, 芯片会依次照此顺序寻找idbloader.img, 如果都没找到就初始化USB. 但注意板子不会自己进maskrom模式, 此时串口也没任何输出 <br>
+bl2结束后, uboot接管启动流程, 至于是从哪个介质加载uboot就不清楚了, 一般idbloader和uboot都是写在一个介质上的
+
+TF卡里有radxa os固件, 貌似是Miniloader的
+spi flash空
+上电启动radxa os, 按住rec无法进loader
 
 ## 使用RK Dev Tool时使用的Loader是什么东西?
+RK的Loader有两种: miniloader和ubootSPL/TPL, 两者都包含 ddrBin usbplug <br>
+在maskrom模式下, 刷写系统时, 第一行的Loader即上述的miniloader或者ubootSPL/TPL, 其运行在内存中, 用于 "和 rkdevtool 通讯以及写 flash 等操作" <br>
 
-正常情况下, 芯片上电后, 会先运行芯片内部的代码Boot Rom, 或者说Mask Rom, 这个代码用于检测外部存储设备如EMMC SD卡等, 如果没存储设备, 或者在所有的存储设备中都没有Loader, 板子会idle, 并不会自己进maskrom模式, 此时串口也没任何输出 <br>
-如果有Loader能加载, 比如一个spi nor flash里面刷了idbloader和uboot, 就会进入spi flash继续执行目标代码. <br>
+> idbloader是特殊的loader, 由上面的Loader加上ddrBin, 再按IDB格式打包而成
 
-如果是emmc或者sd卡, 里面有loader, 此时按recovery按键上电是不会进loader模式的
-
-loader类似uboot, 也是一种boot loader, 而我们使用的loader.img其实就是编译uboot时产出的idbloader.img <br>
-该loader在运行完后会继续执行u-boot.itb, 也就是uboot <br>
+上述的Loader都属于BL2阶段 <br>
 
 > 和全志对比一下, idbloader.img和u-boot.itb一起对应全志的u-boot-with-spl.bin
 
 > 在Mask Rom模式下, 只能进行对于loader的烧写
 
+如果是emmc或者sd卡, 里面有uboot, 此时按recovery按键上电是不会进loader模式的
+sd卡, 刷入自编译Uboot(u-boot-rockchip.bin), 无法进Loader模式
 
-如果你的板子没有SPI Flash, 比如Radxa Rock 5C, 由于没有任何存储介质, 上电后应该是直接进mask rom模式
+sd卡, 刷入radxa os, 无法进loader, 且串口不弹什么Uboot vXXX
 
-loader有时也指miniloader, todo
-
-## 瑞芯微多介质启动优先级
-
+## RK设备的Loader模式 和 Maskrom模式
+Maskrom模式一般用于刷写固件系统到存储设备里, 一般要选择一个Loader和一个系统镜像, 选的Loader是临时运行在内存中的, 专门用来把系统镜像刷到存储设备里 <br>
+Loader模式: 如果有板载存储设备, 且其有miniloader / uboot SPL/TPL, 此时按REC键上电即可进入Loader模式, 该模式一般用于对某一个分区进行刷写, 如更换rootfs <br>
 
 # Uboot
+RK官方的Uboot v2017.09: https://github.com/rockchip-linux/u-boot <br>
+主线Uboot: https://gitlab.denx.de/u-boot/u-boot.git <br>
+Uboot依赖: git clone https://github.com/rockchip-linux/rkbin.git <br>
+rkbin存储了一些RK芯片所需的TPL ATF等等资源, 是闭源的 <br>
 
-编译出的idbloader.img和u-boot.itb即我们需要的
+后文均以主线Uboot为例. <br>
+```shell
+# 或者去 https://ftp.denx.de/pub/u-boot/ 下载了再解压也行
+git clone https://gitlab.denx.de/u-boot/u-boot.git
+git clone https://github.com/rockchip-linux/rkbin.git
+
+cd u-boot
+git checkout vXXXX.XX
+
+# 根据Soc及内存, 选择合适的TPL
+export ROCKCHIP_TPL=../rkbin/bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin
+# 指定 ATF, 这里直接用rkbin提供的闭源ATF, 如果需要开源的ATF也可去 https://github.com/ARM-software/arm-trusted-firmware 自行构建
+export BL31=../rkbin/bin/rk35/rk3588_bl31_v1.51.elf
+
+export ARCH=arm64
+export CROSS_COMPILE=aarch64-linux-gnu-
+
+# 查找有无自己板子的配置, 如果很不幸没有, 那得自己填一堆参数, 以后有时间可以对比一下同Soc不同板子配置的差异 & 不同SoC差异
+# 比如 Rock 5B 就是 rock5b-rk3588_defconfig
+ls configs/*rkXXXX*
+make XXX_defconfig
+
+make menuconfig
+
+make -j8
+```
+编译产物:
+  - idbloader.img: 刷到MMC设备里的uboot-SPL/TPL
+  - idbloader-spi.img: 同上, 但是刷到SPI Flash设备, 一般不用
+  - u-boot.itb: 刷到MMC设备里的uboot二进制文件
+  - u-boot.img: 猜测是给miniloader打包用的
+  - u-boot-rockchip.bin (这个有9942528 bytes, 即19419个扇区, 9.5MiB): 同idbloader.img
+  - u-boot-rockchip-spi.bin (1979904 bytes, 3867 sectors, 1.9MiB): 同idbloader-spi.img
+
+## 刷写
+若是准备直接刷到SPI Flash里面, 使用: `u-boot-rockchip-spi.bin` 这个文件, 直接dd到SPI里面, 不需要任何偏移, 或者直接用RK Dev tool刷也行 <br>
+下面的方法以刷到SD卡为例, emmc的等几天再加
+```shell
+# 方法1
+# 这个 u-boot-rockchip.bin 异常大, 注意别把第一个分区覆盖了
+sudo dd if=u-boot-rockchip.bin of=/dev/XXX seek=64 status=progress
+sync
+
+# 方法2
+sudo dd if=idbloader.img of=/dev/XXX seek=64
+sudo dd if=u-boot.itb of=/dev/XXX seek=16384
+
+# 以我编译的uboot为例, idbloader.img大小为424个扇区, u-boot.utb大小为3099个扇区
+
+# todo: rk wiki烧boot rootfs时候分区是32768 262144, 不确定这个是不是写死了的
+```
+## bootargs
+以Rock5B为例, 其console=ttyS2,1500000, 不同开发板这个可能不同
+```text
+LABEL Test
+  LINUX /kernel
+  INITRD /initrd
+  FDT /dtb
+  APPEND root=/dev/xxx earlyprintk console=ttyS2,1500000 rw rootwait rootfstype=ext4 init=/sbin/init
+```
+# Kernel
+瑞芯微BSP内核: https://github.com/rockchip-linux/kernel <br>
+armbian从BSP移植的内核: https://github.com/armbian/linux-rockchip <br>
+对于rk3588, 一般使用官方内核或者移植内核, 以求最大化利用芯片的各个能力, 如PCIE GPU VPU NPU等 <br>
+无论移植的内核, 还是BSP内核, 其内核小版本总是落后于主线一截. <br>
+对于其他rk芯片, 可以选择和3588一样用BSP, 或者用自编译的主线内核, 不过那样有点浪费 <br>
+
+:::NOTE
+armbian移植内核实测支持PCIE <br>
+ophub的通用stable内核也支持PCIE
+:::
+
+> 截至2026.1, rk官方的内核有: 4.4, 4.19, 5.10, 6.1, 6.6, 其他移植的内核只有5.10和6.1, 当前主线最新LTS为6.18
+
+> Linux 7.0 已支持 RK3588 VPU驱动
+
+```shell title="编译"
+export ARCH=arm64
+export CROSS_COMPILE=aarch64-linux-gnu-
+
+make defconfig
+
+# make kernel image, output: arch/arm64/boot
+make -j4 Image
+
+# Kernel DTB FILE, output: arch/arm64/boot/dts
+make -j4 dtbs
+
+make -j4 modules
+```
+
+内核具体配置教程以后有时间再弄 <br>
+编译完内核模块后记得安装到开发板的/lib/modules <br>
+
+# 其他
+Red LED = GPIO4_C5 (149) chip4 - 21
+Blue LED = GPIO0_B7 (15) chip0 - 15
+绿灯无法控制, 只要上电一定会亮
+
+not useable
+GPIO0_C0 (PWM1_M0)为风扇接口, /sys/devices/platform/fd8b0010.pwm/pwm/pwmchip0
+导出PWM接口GPIO:
+echo 0 > export
+设置PWM周期, 单位ns
+echo 10000 > pwm0/period
+设置PWM占空比, 例如8000 / 10000 就是 80%
+echo 5000 > pwm0/duty_cycle
+设置PWM极性
+echo normal > pwm0/polarity
+启用PWM
+echo 1 > pwm0/enable
+关闭PWM
+echo 0 > pwm0/enable
+
+
+温度: /sys/class/thermal/thermal_zone0/temp
