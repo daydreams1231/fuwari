@@ -124,7 +124,7 @@ Dockek的 -v 参数可以映射宿主机目录到容器内, 以冒号分隔, 左
 但后续宿主机该目录发生变化时(例如挂载了一个硬盘到此处), 该变化不会同步到容器内 <br>
 要解决这个问题, 可在容器 -v 参数的右边添加rslave, 让容器外的新挂载同步到容器内 <br>
 例如:
-```text[Docker创建容器参数]
+```tip[Docker创建容器参数]
 -v /mnt:/in/container:rslave
 ```
 
@@ -143,8 +143,7 @@ podman -v
 不同用户的镜像存放路径是不同的, root用户的容器及镜像放在/var/lib/containers/storage/, 而普通用户的放在~/.local/share/containers/storage/ <br>
 
 ## 配置镜像加速
-nano /etc/containers/registries.conf
-```
+```text title="/etc/containers/registries.conf"
 unqualified-search-registries = ["docker.io"]
 
 [[registry]]
