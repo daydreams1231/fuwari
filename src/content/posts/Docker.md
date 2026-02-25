@@ -159,6 +159,7 @@ location = "docker.1panel.live"
 
 ## 让非root用户的podman容器开机自启
 podman没有守护进程, 必须借助systemd等工具实现容器自启动, 你去问ai会回复你加上--restart参数, 但那只对docker有效 <br>
+> 当然, 你也可以在一些开机会自动执行的脚本(比如rc.local)里直接写命令: podman start xxx, 不过这样不是很优雅就是了 <br>
 
 对于root用户, podman容器自启动文件放在: `/etc/containers/systemd/`, 其他用户放在: `~/.config/containers/systemd` <br>
 别的位置请自行查阅podman手册 <br>
@@ -243,7 +244,6 @@ lxc.net.0.flags = up
 ```shell wrap=false
 docker run -d --name openlist --user 1000:1000 --restart unless-stopped -v /root/config/openlist:/opt/openlist/data -p 5244:5244 -e UMASK=022 openlistteam/openlist:latest
 ```
-
 ```text wrap=false title="Podman Quadlet.container"
 [Unit]
 Description=OpenList
@@ -267,6 +267,41 @@ Restart=no
 [Install]
 WantedBy=multi-user.target default.target
 ```
+
+## CloudDrive2
+一个类似openlist/alist的网盘挂载工具, 闭源, 需要登录账户使用, 免费版只能添加2个云盘 <br>
+webui: IP:`19798` <br>
+```shell wrap=false title="Docker CLI"
+docker run -d \
+    --name clouddrive \
+    --restart unless-stopped \
+    --env CLOUDDRIVE_HOME=/Config \
+    -v /root/config/cd2:/Config \
+    -p 19798:19798 \
+    --pid host \
+    cloudnas/clouddrive2:latest
+```
+```text wrap=false title="Podman Quadlet.container"
+[Unit]
+Description=Clouddrive2
+Requires=network-online.target
+After=network-online.target systemd-timesyncd.service
+
+[Container]
+ContainerName=clouddrive2
+Image=docker.io/cloudnas/clouddrive2:latest
+Volume=/root/config/cd2:/Config
+PublishPort=19798:19798
+Environment=CLOUDDRIVE_HOME=/Config
+AutoUpdate=registry
+
+[Service]
+Restart=no
+
+[Install]
+WantedBy=multi-user.target default.target
+```
+
 ## qBittorrent Enhanced Edition
 若下载目录不属于PUID PGID的用户, 请开启ENABLE_DOWNLOADS_PERM_FIX, 或者确保该目录能被用户读写
 ```shell wrap=false title="docker-cli"
@@ -340,9 +375,8 @@ sudo docker run -d \
 ```text wrap=false title="Podman Quadlet.container"
 [Unit]
 Description=Aria2-Pro container
-Wants=clash.service
 Requires=network-online.target
-After=network-online.target clash.service systemd-timesyncd.service mnt.mount
+After=network-online.target systemd-timesyncd.service
 
 [Container]
 ContainerName=aria2-pro
