@@ -534,6 +534,8 @@ docker run --name Zerotier --rm --cap-add NET_ADMIN --device /dev/net/tun zeroti
 ```
 
 ## Firefox浏览器 (5901 VNC)
+注意, 这里只允许VNC访问, VNC密码仅仅用于鉴权, 但无法防止MITM攻击, 请只在可信内网使用 <br>
 ```shell wrap=false
-docker run -d --name firefox -p 5901:5901 -e TZ=Asia/Shanghai -e DISPLAY_WIDTH=1280 -e DISPLAY_HEIGHT=720 -e ENABLE_CJK_FONT=1 -e  -e WEB_LISTENING_PORT=-1 -e VNC_LISTENING_PORT=5901 -e VNC_PASSWORD=<VNC_PASSWORD> -v /root/config/firefox:/config:rw jlesage/firefox
+docker run -d --name firefox -p 5901:5901 -e TZ=Asia/Shanghai -e DISPLAY_WIDTH=1280 -e DISPLAY_HEIGHT=720 -e ENABLE_CJK_FONT=1 -e WEB_LISTENING_PORT=5900 -e VNC_LISTENING_PORT=5901 -e VNC_PASSWORD=<VNC_PASSWORD> -v /root/config/firefox:/config:rw jlesage/firefox
 ```
+如果宿主机的内核有GPU驱动, 可加上: `--device /dev/dri` 来启用GPU加速
