@@ -1,7 +1,7 @@
 ---
 title: Samba / KSMBD / FTP / NFS 配置
 published: 2025-10-09
-description: 'Linux下局域网文件分享服务器搭建指南'
+description: 'Debian下局域网文件分享服务器搭建指南'
 image: ''
 tags: [Linux, Samba, KSMBD, FTP]
 category: '教程'

@@ -33,3 +33,10 @@ lang: 'zh_CN'
 ```text
 https://issuepcdn.baidupcs.com/issue/netdisk/yunguanjia/BaiduNetdisk_7.24.1.2.exe
 ```
+
+:::tip
+  - 7.45.2: 完全变成大便前的最后一个版本, 又称为经典版, 虽然也挺垃圾就是了
+  - 7.29.x 以后增加了废物`云一朵`, 用于拖慢运行速度, 这个版本的上一个版本是[7.28.1.6](https://issuepcdn.baidupcs.com/issue/netdisk/yunguanjia/BaiduNetdisk_7.28.1.6.exe), 但实测其也有云一朵, 并且卸载时提示版本为7.27, 刷KPI这一块...
+:::
+
+> 安装目录下的 modules 里有 `AiEngine` 和 `BrowserEngine`, 均可删掉

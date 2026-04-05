@@ -130,7 +130,9 @@ Dockek的 -v 参数可以映射宿主机目录到容器内, 以冒号分隔, 左
 
 # 容器访问宿主机
 以bridge网络容器为例, 假设docker0接口IP为172.16.0.1, 容器要访问宿主机, 除了直接填这个IP外, 还可以使用 `host.docker.internal` <br>
-> 对于podman, 则是: `host.containers.internal`
+> 对于podman, 则是: `host.containers.internal` <br>
+
+这个IP会被容器解析成docker0接口的IP
 
 # PODMAN
 ## 安装

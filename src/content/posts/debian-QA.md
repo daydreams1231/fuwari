@@ -43,3 +43,76 @@ sudo zramctl
 ```shell
 fallocate -l 1G /swap && chmod 600 /swap && mkswap /swap && swapon /swap && echo "/swap swap swap defaults 0 0" >> /etc/fstab
 ```
+
+## 安全弹出硬盘
+> umount并不是安全弹出, 它只是取消挂载, 但设备实际还是能被访问的 <br>
+
+```shell
+# 使用gio命令. Doc: https://manpages.debian.org/testing/libglib2.0-bin/gio.1.en.html
+sudo apt install gio
+
+gio mount -t /dev/sda1
+```
+
+```shell
+# 使用 udisks2
+sudo apt install udisks2
+
+udisksctl power-off -b /dev/sda
+```
+
+# 检查磁盘坏块
+```shell
+badblocks -s -v -o /root/bb.log /dev/sdb
+```
+# 检查磁盘
+```shell
+fsck -a /dev/sdb
+```
+# 查看WiFi AP的mac:
+```shell
+sudo iw dev wlan0 link
+```
+# 查看周围WLAN (需要NetworkManager)
+```shell
+nmcli dev wifi list
+```
+# 磁盘读写测速
+```shell
+sudo dd if=/dev/zero of=temp.bin bs=1M count=1024 status=progress oflag=direct <br>
+sudo dd if=temp.bin of=/dev/null bs=1M count=1024 status=progress iflag=direct
+```
+
+# 不使用Netplan更改接口跃点数
+```shell
+sudo apt install ifmetric
+sudo ifmetric 网卡名 跃点数
+```
+# cpupower
+```shell
+sudo apt install linux-cpupower
+# 查看当前配置
+sudo cpupower -c all frequency-info
+
+# 查看可用的配置
+cat /sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors
+##有几行就代表你的CPU有几个Cluster, Arm CPU一般会有多个Cluster
+## 每一行代表当前Cluster可用的governor
+
+# 临时换策略
+sudo cpupower -c all frequency-set --governor schedutil
+
+# 持久化配置（Debian/Ubuntu）
+/etc/systemd/system/cpufreq.service
+```text
+[Unit]
+Description=Set CPU scaling governor to performance
+
+[Service]
+ExecStart=/usr/bin/cpupower frequency-set -g performance
+
+[Install]
+WantedBy=multi-user.target
+```
+sudo systemctl enable --now cpupower
+```

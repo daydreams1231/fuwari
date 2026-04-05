@@ -48,7 +48,7 @@ spi flash空
 上电启动radxa os, 按住rec无法进loader
 
 ## 使用RK Dev Tool时使用的Loader是什么东西?
-RK的Loader有两种: miniloader和ubootSPL/TPL, 两者都包含 ddrBin usbplug <br>
+RK的Loader有两种: miniloader和uboot SPL/TPL, 两者都包含 ddrBin usbplug <br>
 在maskrom模式下, 刷写系统时, 第一行的Loader即上述的miniloader或者ubootSPL/TPL, 其运行在内存中, 用于 "和 rkdevtool 通讯以及写 flash 等操作" <br>
 
 > idbloader是特殊的loader, 由上面的Loader加上ddrBin, 再按IDB格式打包而成
@@ -172,21 +172,53 @@ make -j4 modules
 Red LED = GPIO4_C5 (149) chip4 - 21
 Blue LED = GPIO0_B7 (15) chip0 - 15
 绿灯无法控制, 只要上电一定会亮
+## TypeC作为电源输入时, 查看协商的电压
+```shell
+awk '{printf ("%0.2f\n",$1/172.5); }' </sys/devices/iio_sysfs_trigger/subsystem/devices/iio\:device0/in_voltage6_raw
+```
 
-not useable
-GPIO0_C0 (PWM1_M0)为风扇接口, /sys/devices/platform/fd8b0010.pwm/pwm/pwmchip0
-导出PWM接口GPIO:
-echo 0 > export
-设置PWM周期, 单位ns
-echo 10000 > pwm0/period
-设置PWM占空比, 例如8000 / 10000 就是 80%
-echo 5000 > pwm0/duty_cycle
-设置PWM极性
-echo normal > pwm0/polarity
-启用PWM
-echo 1 > pwm0/enable
-关闭PWM
-echo 0 > pwm0/enable
+## 风扇
+Rock5B的风扇不是常规意义上的PWM风扇, 而是一个普通的双线风扇, 一般PWM风扇内会有一个PWM控制器, 由系统通过PWM信号控制风扇转速, 而Rock5B的风扇则是直接接在GPIO上, 通过控制GPIO的电压大小来控制风扇速度, 类似于PWM风扇 <br>
 
+[Radxa Wiki](https://docs.radxa.com/rock5/rock5b/getting-started/interface-usage/fan) <br>
 
-温度: /sys/class/thermal/thermal_zone0/temp
+一般DTS文件内已配置PWM GPIO, 不需要在系统内额外配置GPIO为PWM输出 <br>
+总结, 对于Rock5B, 其风扇控制命令:
+```shell
+echo FAN_SPEED_NUMBER | sudo tee /sys/devices/platform/pwm-fan/hwmon/hwmon*/pwm1
+```
+:::info
+FAN_SPEED_NUMBER取值范围为0-255, 0为风扇停止, 255为全速, 其他数值代表不同的转速 <br>
+但需注意, 其值与风扇强相关, 同一个值在不同的风扇上可能会有不同的效果 <br>
+:::
+
+假设你的风扇在0-255范围内, 均有不同的转速, 即理想情况, 可通过用户脚本来实现温控:
+```shell
+#!/bin/bash
+# 读取当前 CPU 温度（单位：摄氏度）
+get_temp() {
+    cat /sys/class/thermal/thermal_zone0/temp | awk '{print int($1/1000)}'
+}
+# 设置风扇转速 (0-255)
+set_fan_speed() {
+    echo "$1" | sudo tee /sys/devices/platform/pwm-fan/hwmon/hwmon8/pwm1 > /dev/null
+}
+# 主逻辑循环
+# 具体控制逻辑见 if-else if部分, 如果看不懂可以问AI
+while true; do
+    temp=$(get_temp)
+    echo "Temp: $temp"
+    if [[ $temp -gt 35 ]]; then
+        set_fan_speed 30
+    else if [[ $temp -gt 40 ]]; then
+        set_fan_speed 90
+    else if [[ $temp -gt 45 ]]; then
+        set_fan_speed 150
+    else if [[ $temp -gt 50 ]]; then
+        set_fan_speed 255
+    else
+        set_fan_speed 0
+    fi
+    sleep 30
+done
+```
