@@ -29,6 +29,7 @@ lang: ''
 ```shell
 echo "clash:x:0:250:::/usr/sbin/nologin" >> /etc/passwd
 ```
+
 ## 开启IP转发
 在OpenWrt等系统上这步可省略
 ```shell
@@ -55,7 +56,10 @@ sysctl -p
 iptables -V
 # 如果输出: iptables x.x.x (nf_tables), 代表系统使用nftables, 否则使用iptables
 ```
-
+---
+以下所有命令都需要在docker修改系统路由前执行, 以防止某些Bug
+以后再看能否fix this
+---
 ## iptables实现 (适用于老系统)
 ```shell
 # 让设备具有简单的路由NAT功能 (eth0为设备上网的接口, 自行改为对应接口, 不会的看本文末尾QA)
@@ -97,6 +101,10 @@ ipset add localnetwork6 ff00::/8
 iptables -t mangle -N clash
 ip6tables -t mangle -N clash
 
+# 对所有进入设备的流量, 将数据包转到clash链处理
+iptables -t mangle -A PREROUTING -j clash
+ip6tables -t mangle -A PREROUTING -j clash
+
 # 对进入clash链的数据包, DNS请求以及内网IP直接RETURN, 不打标
 # 如果需要放行doh dot等流量, 自行修改
 iptables -t mangle -A clash -p udp --dport 53 -j RETURN
@@ -115,19 +123,15 @@ iptables -t mangle -A clash -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --
 ip6tables -t mangle -A clash -p tcp -j TPROXY --on-ip ::1 --on-port 7894 --tproxy-mark 1
 ip6tables -t mangle -A clash -p udp -j TPROXY --on-ip ::1 --on-port 7894 --tproxy-mark 1
 
-# 对所有进入设备的流量, 将数据包转到clash链处理
-iptables -t mangle -A PREROUTING -j clash
-ip6tables -t mangle -A PREROUTING -j clash
-
 # 让打了标的流量进入INPUT链 TProxy Mark和常规Mark都算
-ip rule add fwmark 1 table 100 
+ip rule add fwmark 1 table 100 priority 30000
 ip route add local 0.0.0.0/0 dev lo table 100
-ip -6 rule add fwmark 1 table 106
-ip -6 route add local ::/0 dev lo table 106
+ip -6 rule add fwmark 1 table 100 priority 30000
+ip -6 route add local ::/0 dev lo table 100
 
 # 以上是代理局域网设备的, 为了实现代理本机流量, 需要额外操作:
 # 由于本机上网流量直接进入OUTPUT链, 后经POST Routing发出, 所以可在 OUTPUT 链对数据包打标记, 让相应的包重路由到 PREROUTING 链上
-# DNS请求以及DST为内网IP的永远直连, 不要重定向
+# 要求: DNS请求以及DST为内网IP的永远直连, 不要重定向
 # 代理本机流量有两者方法, 1是过滤指定标记的数据包, 这种方法需要你的代理软件能设置出站流量的数据包标记, 主流软件都支持
 # 第二种是gid方案, 让clash以特定uid gid运行, 再在iptables配置指定gid的流量其OUTPUT直连
 ## 方法1: 打标 (clash对应routing-mark: 255) ipv6类似, 这里省略了
@@ -146,11 +150,23 @@ iptables -t mangle -A clash_self -j MARK --set-mark 1
 ## 只有Clash发出的流量能直接OUTPUT, 其余流量进入clash_self子链
 iptables -t mangle -A OUTPUT -m owner ! --gid-owner 250 -j clash_self
 ```
+
+---
+
 ## nftables实现 (现代系统方案)
 nftables天生就支持ip集合功能, 并且可以一条规则同时匹配IPv4 + IPv6, 免去了近一半操作, 非常好用 <br>
 而且, 若ip集合发生变化, nftables能自动处理, 不需要重配路由 <br>
 nftables还允许以脚本的形式自动处理规则, 不需要像iptables那样一条一条敲命令. <br>
 
+:::tip
+nft中, inet/ip/ip6类型表的优先级对应表:
+  - raw     -300
+  - mangle  -150
+  - dstnat  -100
+  - filter  0
+  - security    50
+  - srcnat  100
+:::
 ```shell title=change_fw.nft
 #!/usr/sbin/nft -f
 # 指定出口网卡
@@ -203,7 +219,7 @@ table inet clash {
     chain src_nat {
         type nat hook postrouting priority 100; policy accept;
         oifname $out_interface masquerade
-        # 如果有多个上网口, 最终具体走哪个口由默认路由优先级决定
+        # 如果有多个上网口, 最终具体走哪个口由路由表决定
     }
     # chain的定义中如果有type xxx hook xxx, 表示这是一个基本链, 否则是常规链
     # 在基本链中, return 就相当于该基本链的默认策略
@@ -214,20 +230,20 @@ table inet clash {
         udp dport 53 return         # 绕过经过本机的DNS请求
         ip daddr @local_ipv4 return # 绕过所有内网地址
         ip6 daddr @local_ipv6 return
-        ip daddr @geoip_cn_ipv4 return    # 国内IPv4直连
-        ip6 daddr @geoip_cn_ipv6 return    # 国内IPv6直连
+        ip daddr @geoip_cn_ipv4 return    # 国内IP直连
+        ip6 daddr @geoip_cn_ipv6 return
         meta l4proto { tcp, udp } meta mark set $add_mark tproxy ip to 127.0.0.1:$tproxy_port accept
         meta l4proto { tcp, udp } meta mark set $add_mark tproxy ip6 to [::1]:$tproxy_port accept
     }
     # 本机上网流量过滤及打标
     # 容器上网流量不属于本机流量, 其容器相当于都连接到podman0这个接口, 自己就是容器的网关
     chain mark_self_out_traffic {
-        type route hook output priority mangle; policy accept;
+        type route hook output priority -150; policy accept;
         udp dport 53 return         # 本机发起的DNS请求直连
         ip daddr @local_ipv4 return # 绕过所有内网地址
         ip6 daddr @local_ipv6 return
-        ip daddr @geoip_cn_ipv4 return    # 国内IPv4直连
-        ip6 daddr @geoip_cn_ipv6 return    # 国内IPv6直连
+        ip daddr @geoip_cn_ipv4 return    # 国内IP直连
+        ip6 daddr @geoip_cn_ipv6 return
         meta skgid 250 return       # 绕过gid=250的应用发出的所有流量
         meta l4proto { tcp, udp } meta mark set $add_mark accept        # 其他流量重路由到prerouting
     }
@@ -235,8 +251,16 @@ table inet clash {
 
 ```
 ### NFT配套脚本
-这个脚本在change_fw.nft执行后运行, 用于向ip集合中添加IP
-```shell title=add_ip.sh
+这个脚本在change_fw.nft执行后运行, 用于向ip集合中添加IP <br>
+
+:::tip
+ip route显示默认路由表(main路由表) <br>
+ip route show table xxx, 显示xxx路由表 <br>
+
+ip rule 显示系统当前的路由策略/规则, 显示的内容是所有 ip rule show table xxx 的合集 <br>
+输出结果中, lookup local代表查找local路由表, 同时也表示该行规则属于local路由表 <br>
+:::
+```shell title=before_start.sh
 #!/bin/bash
 
 # 添加国内IP, OpenClash同款源
@@ -250,29 +274,32 @@ systemd service
 [Service]
 Type=exec
 User=clash
-ExecStartPre=/bin/sh -c 'until ping -W 1 -c1 223.5.5.5; do sleep 1; done;'
-ExecStartPre=/usr/bin/sleep 1
 ExecStartPre=/root/config/clash/change_firewall.nft
-ExecStartPre=ip rule add fwmark 1 table 100
+ExecStartPre=ip rule add fwmark 1 table 100 priority 30000
 ExecStartPre=ip route add local 0.0.0.0/0 dev lo table 100
-ExecStartPre=ip -6 rule add fwmark 1 table 106
-ExecStartPre=ip -6 route add local ::/0 dev lo table 106
-ExecStartPre=/root/config/clash/add_ip.sh
+ExecStartPre=ip -6 rule add fwmark 1 table 100 priority 30000
+ExecStartPre=ip -6 route add local ::/0 dev lo table 100
+ExecStartPre=/root/config/clash/before_start.sh
 ExecStart=/root/config/clash/mihomo-linux-arm64 -f /home/radxa/clash/clash.yaml -d /root/config/clash
-ExecStop=/usr/bin/kill $MAINPID
+ExecStop=/bin/kill $MAINPID
 ExecStopPost=nft delete table inet clash
 ExecStopPost=ip rule del fwmark 1 table 100
 ExecStopPost=ip route del local 0.0.0.0/0 dev lo table 100
-ExecStopPost=ip -6 rule del fwmark 1 table 106
-ExecStopPost=ip -6 route del local ::/0 dev lo table 106
+ExecStopPost=ip -6 rule del fwmark 1 table 100
+ExecStopPost=ip -6 route del local ::/0 dev lo table 100
 Restart=on-failure
 ```
+
 :::tip
 start = ExecStartPre + ExecStart
 stop = ExecStop + ExecStopPost
 restart = stop + start
 :::
 
+:::warn
+在安装了Docker的系统上, 如果docker使用nftables, 并且docker在clash.service之前运行, docker先添加的防火墙会让后添加的clash防火墙无法正常运行 <br>
+直接表现就是断网, 要解决该问题, 需要想办法让clash在docker之前运行, 即在clash.service文件的[Unit]部分添加 `Before=docker.service`
+:::
 ## 使用Tun处理TCP与UDP流量(Redir TCP + TUN UDP)
 如果你的设备内核比较老, 或者是那种阉割了一堆功能的内核, 你还改不了的那种, 可以试一试Tun设备方案 <br>
 该方案同样需要内核配置启用了tun设备, 如果没有, 建议换设备

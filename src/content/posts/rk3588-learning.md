@@ -208,17 +208,9 @@ set_fan_speed() {
 while true; do
     temp=$(get_temp)
     echo "Temp: $temp"
-    if [[ $temp -gt 35 ]]; then
-        set_fan_speed 30
-    else if [[ $temp -gt 40 ]]; then
-        set_fan_speed 90
-    else if [[ $temp -gt 45 ]]; then
-        set_fan_speed 150
-    else if [[ $temp -gt 50 ]]; then
+    if [[ $temp -gt 47 ]]; then
         set_fan_speed 255
-    else
-        set_fan_speed 0
     fi
-    sleep 30
+    sleep 15
 done
 ```
