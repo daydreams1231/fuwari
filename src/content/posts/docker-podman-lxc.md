@@ -523,9 +523,39 @@ docker run -d \
    cnk3x/xunlei
 ```
 
-## Firefox浏览器 (5901 VNC)
-注意, 这里只允许VNC访问, VNC密码仅仅用于鉴权, 但无法防止MITM攻击, 请只在可信内网/VPN环境使用 <br>
+## Firefox浏览器
+docker镜像约300M, 5900为HTTP访问端口, 5901为VNC访问端口 <br>
 ```shell wrap=false
-docker run -d --name firefox -p 5901:5901 -e TZ=Asia/Shanghai -e DISPLAY_WIDTH=1280 -e DISPLAY_HEIGHT=720 -e ENABLE_CJK_FONT=1 -e WEB_LISTENING_PORT=5900 -e VNC_LISTENING_PORT=5901 -e VNC_PASSWORD=<VNC_PASSWORD> -v /root/config/firefox:/config:rw jlesage/firefox
+docker run -d \
+  --name firefox \
+  -p 5900:5900 \
+  -e TZ=Asia/Shanghai \
+  -e DISPLAY_WIDTH=1280 \
+  -e DISPLAY_HEIGHT=720 \
+  -e ENABLE_CJK_FONT=1 \
+  -e WEB_LISTENING_PORT=5900 \
+  -e VNC_LISTENING_PORT=5901 \
+  -e VNC_PASSWORD=<VNC_PASSWORD> # 设置为-1可禁用VNC \
+  --shm-size="1gb" \
+  -v /root/config/firefox:/config:rw \
+  jlesage/firefox:latest
 ```
 如果宿主机的内核有GPU驱动, 可加上: `--device /dev/dri` 来启用GPU加速
+
+## Chrome浏览器
+镜像约1G左右 <br>
+3000端口为HTTP访问的端口, 但必须在宿主机反代一下才能用, 3001是HTTPS访问的端口 <br>
+```shell wrap=false
+docker run -d \
+  --name=chromium \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e TZ=Asia/Shanghai \
+  -e CHROME_CLI=https://www.baidu.com/ \
+  -p 3000:3000 \
+  -p 3001:3001 \
+  -v /root/config/chrome:/config \
+  --shm-size="1gb" \
+  lscr.io/linuxserver/chromium:latest
+```
+如果宿主机的内核有GPU驱动, 可加上: `--device /dev/dri -e AUTO_GPU=true` 来启用GPU加速
