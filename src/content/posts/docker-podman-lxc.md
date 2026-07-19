@@ -246,9 +246,26 @@ lxc.net.0.flags = up
 
 # 个人常用镜像
 ## OpenList
+docker cli版本:
 ```shell wrap=false
 docker run -d --name openlist --user 1000:1000 --restart unless-stopped -v /root/config/openlist:/opt/openlist/data -p 5244:5244 -e UMASK=022 openlistteam/openlist:latest
 ```
+docker-compose版本(fnos version):
+```text wrap=false title="docker-compose.yml"
+services:
+  openlist:
+    image: 'openlistteam/openlist:latest'
+    container_name: openlist
+    user: '1000:1001'
+    volumes:
+      - './openlist:/opt/openlist/data'
+    ports:
+      - '5244:5244'
+    environment:
+      - UMASK=022
+    restart: unless-stopped
+```
+podman quadlet版本(use systemd as init system):
 ```text wrap=false title="Podman Quadlet.container"
 [Unit]
 Description=OpenList
@@ -275,8 +292,9 @@ WantedBy=multi-user.target default.target
 
 ## CloudDrive2
 一个类似openlist/alist的网盘挂载工具, 闭源, 需要登录账户使用, 免费版只能添加2个云盘 <br>
-webui: IP:`19798` <br>
-```shell wrap=false title="Docker CLI"
+我只把它当作特定网盘的挂载器, 别的功能用不上, 故启动的命令有些删减 <br>
+docker cli:
+```shell wrap=false
 docker run -d \
     --name clouddrive \
     --restart unless-stopped \
@@ -286,6 +304,23 @@ docker run -d \
     --pid host \
     cloudnas/clouddrive2:latest
 ```
+docker-compose:
+```text wrap=false title="docker-compose.yml"
+services:
+  clouddrive2:
+    image: cloudnas/clouddrive2:latest
+    container_name: clouddrive2
+    environment:
+      - TZ=Asia/Shanghai
+      - CLOUDDRIVE_HOME=/Config
+    volumes:
+      - /root/config/cd2:/Config
+    restart: unless-stopped
+    pid: "host"
+    ports:
+      - 19798:19798
+```
+podman quadlet:
 ```text wrap=false title="Podman Quadlet.container"
 [Unit]
 Description=Clouddrive2
@@ -305,6 +340,24 @@ Restart=no
 
 [Install]
 WantedBy=multi-user.target default.target
+```
+## LitePan
+cd2替代品, 新出的, 不开会员也能挂载多个云盘, 大部分都是我能用的主流网盘, 同样支持webdav服务器分享 <br>
+docker-compose:
+```text wrap=false title="docker-compose.yml":
+services:
+  litepan:
+    image: ponphil/litepan:latest
+    container_name: litepan
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+      - ./log:/app/log
+      - ./strm:/app/strm
+      - ./plugins:/app/plugins
 ```
 
 ## qBittorrent Enhanced Edition

@@ -22,33 +22,33 @@ lang: ''
 如果你以前捡过一些瑞芯微的arm板子, 如OEC-T、各种基于rk3399的工控板, 对这个应该不陌生 <br>
 
 # 概念及 Q&A
+## 瑞芯微 Loader模式 与 Maskrom模式
+Maskrom模式是瑞芯微的底层刷机模式, 可类比高通设备的9008. 可用于刷写镜像文件到板载存储里, 例如刷armbian到emmc, 刷spi image到spi-nor, 也可清除某个硬盘的数据. <br>
+Loader模式: 如果有板载存储设备, 且其有miniloader / uboot SPL/TPL, 此时按REC键上电即可进入Loader模式, 该模式一般用于对某一个分区进行刷写, 如更换rootfs <br>
+
 ## 启动流程及优先级
 [瑞芯微启动流程](https://opensource.rock-chips.com/wiki_Boot_option#Boot_flow). <br>
 [ophub Discussions](https://github.com/ophub/amlogic-s9xxx-armbian/discussions/1634) <br>
 [FriendlyElecWiki](https://wiki.friendlyelec.com/wiki/index.php?title=Template:RockchipBootPriority/zh&redirect=no) <br>
-芯片上电 -> 运行芯片内部MaskRom(Boot rom) -> Loader1区域(bl2) -> Loader2区域(bl33) -> boot.img -> rootfs <br>
-简化一下就是 bootrom -> SPL -> uboot <br>
-除去Maskrom阶段, 后面的步骤都是在芯片外部的存储介质上进行的, 如SPI-NOR Flash, EMMC, SD/TF <br>
+在芯片上电后, 会自动执行内部的MaskRom代码, 之后跳转到外部硬盘, 依次运行 bl2 和 bl33, 即bootloader, 一般为uboot. <br
+如果外部硬盘没bootloader, 会自动进入maskrom模式. <br>
+uboot在初始化完成后会找内核, 启动内核, 挂载rootfs等等 <br>
+:::note
+如果有多个存储设备, 比如 spi-nor 和 emmc同时存在, 如果uboot烧写在spi-nor上, uboot在寻找内核以及dtb等文件时, 具体会从哪个设备上找, 取决于uboot env配置
+:::
 
-Loader1区域: idbloader.img, 分为传统的ubootSPL/TPL或者瑞芯微官方的miniloader, 这个阶段一般用来初始化外设, 在瑞芯微中, TPL负责初始化内存 <br>
-Loader2区域: uboot.itb, 真正的uboot程序在此运行 <br>
+Loader1区域(bl2): idbloader.img, 分为传统的ubootSPL/TPL或者瑞芯微官方的miniloader, 这个阶段一般用来初始化外设, 在瑞芯微中, TPL负责初始化内存 <br>
+Loader2区域(bl33): uboot.itb, 真正的uboot程序在此运行 <br>
 
-> 实际上, 真正的启动顺序是 maskrom -> tpl -> maskrom -> spl
 
 优先级(从上至下): <br>
   - SPI NOR
   - SPI NAND
   - EMMC
   - MMC device (sd/tf card)
-Boot Rom结束后, 进入bl2阶段, 芯片会依次照此顺序寻找idbloader.img, 如果都没找到就初始化USB. 但注意板子不会自己进maskrom模式, 此时串口也没任何输出 <br>
-bl2结束后, uboot接管启动流程, 至于是从哪个介质加载uboot就不清楚了, 一般idbloader和uboot都是写在一个介质上的
-
-TF卡里有radxa os固件, 貌似是Miniloader的
-spi flash空
-上电启动radxa os, 按住rec无法进loader
 
 ## 使用RK Dev Tool时使用的Loader是什么东西?
-RK的Loader有两种: miniloader和uboot SPL/TPL, 两者都包含 ddrBin usbplug <br>
+RK的Loader有两种: miniloader和uboot SPL/TPL, 两者都包含 ddrBin usbplug<br>
 在maskrom模式下, 刷写系统时, 第一行的Loader即上述的miniloader或者ubootSPL/TPL, 其运行在内存中, 用于 "和 rkdevtool 通讯以及写 flash 等操作" <br>
 
 > idbloader是特殊的loader, 由上面的Loader加上ddrBin, 再按IDB格式打包而成
@@ -57,18 +57,48 @@ RK的Loader有两种: miniloader和uboot SPL/TPL, 两者都包含 ddrBin usbplug
 
 > 和全志对比一下, idbloader.img和u-boot.itb一起对应全志的u-boot-with-spl.bin
 
-> 在Mask Rom模式下, 只能进行对于loader的烧写
+# 疑难解答
+### 无法启动
+使用 armbian 官方 desktop + vendor内核的镜像, 刷到 TF 卡中 <br>
+串口日志:
+```text
+INFO:    Preloader serial: 2
+NOTICE:  BL31: v2.3():v2.3-868-g040d2de11:derrick.huang, fwver: v1.48
+NOTICE:  BL31: Built : 15:02:44, Dec 19 2024
+INFO:    spec: 0x1
+INFO:    code: 0x88
+INFO:    ext 32k is not valid
+INFO:    ddr: stride-en 4CH
+INFO:    GICv3 without legacy support detected.
+INFO:    ARM GICv3 driver initialized in EL3
+INFO:    valid_cpu_msk=0xff bcore0_rst = 0x0, bcore1_rst = 0x0
+INFO:    l3 cache partition cfg-0
+INFO:    system boots from cpu-hwid-0
+INFO:    disable memory repair
+INFO:    idle_st=0x21fff, pd_st=0x11fff9, repair_st=0xfff70001
+INFO:    dfs DDR fsp_params[0].freq_mhz= 2112MHz
+INFO:    dfs DDR fsp_params[1].freq_mhz= 528MHz
+INFO:    dfs DDR fsp_params[2].freq_mhz= 1068MHz
+INFO:    dfs DDR fsp_params[3].freq_mhz= 1560MHz
+INFO:    BL31: Initialising Exception Handling Framework
+INFO:    BL31: Initializing runtime services
+WARNING: No OPTEE provided by BL2 boot loader, Booting device without OPTEE initialization. SMC`s destined for OPTEE will return SMC_UNK
+ERROR:   Error initializing runtime service opteed_fast
+INFO:    BL31: Preparing for EL3 exit to normal world
+INFO:    Entry point address = 0x200000
+INFO:    SPSR = 0x3c9
+```
+原因: uboot内的 BL2 没有提供 OPTEE（可信执行环境）镜像，因此无法初始化 opteed_fast 运行时服务. 一般情况下不影响启动, 但armbian vendor内核镜像会长时间卡在这里, 无法得知启动情况, 不过从功耗来看应该是没启动的; current内核的镜像只会卡在这里一会, 等一会就进系统了
+解决方案: 换个系统镜像
+:::note
+armbian官方desktop + current内核的镜像尽管能启动, 但实际上只有CLI, 并没有桌面, 还得自己手动装个桌面才行, 而且由于某些Bug, 系统上电后还是进cli(已设置boot target为graphical)
+:::
+### 从Nvme启动时串口没uboot日志
+原因: spi-nor里的uboot是官方版本的, 你需要换成其他uboot, 比如ophub提供的 [SPI Image](https://github.com/ophub/u-boot/tree/main/u-boot/rockchip/rock5b/spi), 或者从TF/EMMC启动armbian官方系统后再armbian-config来安装SPI Image
+> 内核日志由 uboot 传递的 cmdline 决定是否输出
 
-如果是emmc或者sd卡, 里面有uboot, 此时按recovery按键上电是不会进loader模式的
-sd卡, 刷入自编译Uboot(u-boot-rockchip.bin), 无法进Loader模式
 
-sd卡, 刷入radxa os, 无法进loader, 且串口不弹什么Uboot vXXX
-
-## RK设备的Loader模式 和 Maskrom模式
-Maskrom模式一般用于刷写固件系统到存储设备里, 一般要选择一个Loader和一个系统镜像, 选的Loader是临时运行在内存中的, 专门用来把系统镜像刷到存储设备里 <br>
-Loader模式: 如果有板载存储设备, 且其有miniloader / uboot SPL/TPL, 此时按REC键上电即可进入Loader模式, 该模式一般用于对某一个分区进行刷写, 如更换rootfs <br>
-
-# Uboot
+# 编译Uboot
 RK官方的Uboot v2017.09: https://github.com/rockchip-linux/u-boot <br>
 主线Uboot: https://gitlab.denx.de/u-boot/u-boot.git <br>
 Uboot依赖: git clone https://github.com/rockchip-linux/rkbin.git <br>
@@ -121,7 +151,7 @@ sync
 sudo dd if=idbloader.img of=/dev/XXX seek=64
 sudo dd if=u-boot.itb of=/dev/XXX seek=16384
 
-# 以我编译的uboot为例, idbloader.img大小为424个扇区, u-boot.utb大小为3099个扇区
+# 以我编译的uboot为例, idbloader.img大小为424个扇区, u-boot.itb大小为3099个扇区
 
 # todo: rk wiki烧boot rootfs时候分区是32768 262144, 不确定这个是不是写死了的
 ```
@@ -178,6 +208,7 @@ awk '{printf ("%0.2f\n",$1/172.5); }' </sys/devices/iio_sysfs_trigger/subsystem/
 ```
 
 ## 风扇
+
 Rock5B的风扇不是常规意义上的PWM风扇, 而是一个普通的双线风扇, 一般PWM风扇内会有一个PWM控制器, 由系统通过PWM信号控制风扇转速, 而Rock5B的风扇则是直接接在GPIO上, 通过控制GPIO的电压大小来控制风扇速度, 类似于PWM风扇 <br>
 
 [Radxa Wiki](https://docs.radxa.com/rock5/rock5b/getting-started/interface-usage/fan) <br>
@@ -214,3 +245,37 @@ while true; do
     sleep 15
 done
 ```
+
+## GPU驱动
+### 系统层面
+闭源libmali, 开源panfrost/panthor, 具体差别见[这里](https://docs.radxa.com/rock5/rock5b/radxa-os/mali-gpu)
+panfrost和panthor区别: 前者是社区逆向出来的GPU驱动, 后者是arm官方做的, linux 6.10亮相. <br>
+老硬件用前者, 新硬件的用后者. 如果要让旧内核( <6.10 )也用上panthor, 需要自行移植补丁. 已知rk vendor内核是有panthor选项的 <br>
+都需要内核开启对应的支持:
+  - CONFIG_DRM_PANFROST
+  - CONFIG_DRM_PANTHOR
+如果你的内核没编译这两项之一, 很遗憾, 你需要手动重新编译内核 <br>
+> ophub的rk3588内核中, 6.1.115/118是开启了Panfrost, 没开Panthor的, 6.1.141是都没开的. 不过该大佬做的系统能方便换内核.
+
+另外, 这些都只是内核空间需要的, 要让GPU真正起作用, 还需要用户空间程序 Mesa <br>
+为了更好的支持, 一般推荐自己编译mesa([教程](https://docs.mesa3d.org/drivers/panfrost.html)), 而不是使用发行版里的 <br>
+
+### 应用层面
+尽管mesa + panfrost/panthor已经能驱动GPU了, 但只限于3D性能, 如果遇到视频编解码场景极大概率还是软件负责的
+> add-apt-repository 是ubuntu特有的软件包, 故推荐使用ubuntu系统
+```shell
+sudo add-apt-repository ppa:liujianfeng1994/panfork-mesa
+sudo add-apt-repository ppa:liujianfeng1994/rockchip-multimedia
+sudo apt update
+sudo apt dist-upgrade
+sudo apt install rockchip-multimedia-config mali-g610-firmware
+```
+支持rk视频硬件加速的软件:
+  - chromium-browser
+  - gstreamer1.0-rockchip
+  - clapper
+  - ffmpeg
+  - kodi
+  - moonlight-embedded
+  - moonlight-qt
+具体介绍见[这里](https://forum.radxa.com/t/introduction-to-rockchip-multimedia-ppa-for-ubuntu-jammy/14537)
