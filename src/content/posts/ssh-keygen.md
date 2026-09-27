@@ -34,7 +34,7 @@ cat KEY_FILE_NAME.pub >> ~/.ssh/authorized_keys
 
 使用OpenWRT的Dropbear生成的密钥, 其私钥看起来是这样的: <br>
 ```text
-ssh-ed25519   @?v?4%u`熢籈}?b 骃礊攰令亏耸塘?過諫;?や?藷.鳥暥镔灬
+ssh-ed25519   <乱码>
 ```
 而正常Linux发行版生成的私钥是这样的:
 ```

@@ -209,12 +209,12 @@ awk '{printf ("%0.2f\n",$1/172.5); }' </sys/devices/iio_sysfs_trigger/subsystem/
 
 ## 风扇
 
-Rock5B的风扇不是常规意义上的PWM风扇, 而是一个普通的双线风扇, 一般PWM风扇内会有一个PWM控制器, 由系统通过PWM信号控制风扇转速, 而Rock5B的风扇则是直接接在GPIO上, 通过控制GPIO的电压大小来控制风扇速度, 类似于PWM风扇 <br>
+Rock5B的风扇不是常规意义上的PWM风扇, 而是一个普通的双线风扇, 一般PWM风扇内会有一个PWM控制器, 由系统通过PWM信号控制风扇转速, 而Rock5B的风扇则是直接接在GPIO上, 通过PWM控制GPIO的电压大小来控制风扇速度, 类似于PWM风扇 <br>
 
 [Radxa Wiki](https://docs.radxa.com/rock5/rock5b/getting-started/interface-usage/fan) <br>
 
 一般DTS文件内已配置PWM GPIO, 不需要在系统内额外配置GPIO为PWM输出 <br>
-总结, 对于Rock5B, 其风扇控制命令:
+对于Rock5B, 其风扇控制命令:
 ```shell
 echo FAN_SPEED_NUMBER | sudo tee /sys/devices/platform/pwm-fan/hwmon/hwmon*/pwm1
 ```
@@ -226,24 +226,46 @@ FAN_SPEED_NUMBER取值范围为0-255, 0为风扇停止, 255为全速, 其他数�
 假设你的风扇在0-255范围内, 均有不同的转速, 即理想情况, 可通过用户脚本来实现温控:
 ```shell
 #!/bin/bash
+
 # 读取当前 CPU 温度（单位：摄氏度）
 get_temp() {
     cat /sys/class/thermal/thermal_zone0/temp | awk '{print int($1/1000)}'
 }
 # 设置风扇转速 (0-255)
 set_fan_speed() {
-    echo "$1" | sudo tee /sys/devices/platform/pwm-fan/hwmon/hwmon8/pwm1 > /dev/null
+    echo "$1" | sudo tee /sys/devices/platform/pwm-fan/hwmon/hwmon*/pwm1 > /dev/null
 }
 # 主逻辑循环
 # 具体控制逻辑见 if-else if部分, 如果看不懂可以问AI
 while true; do
     temp=$(get_temp)
     echo "Temp: $temp"
-    if [[ $temp -gt 47 ]]; then
+    if [[ $temp -gt 50 ]]; then
         set_fan_speed 255
+        sleep 300
+    else
+      set_fan_speed 0
+      sleep 15
     fi
-    sleep 15
 done
+```
+为了让这个温控脚本能开机自启, 这里创建一个systemd service:
+```text title="/etc/systemd/system/fan-control.sevice"
+[Unit]
+Description=Rock5B Fan Control
+
+[Service]
+User=root
+Type=simple
+ExecStart=/bin/bash /root/fan-control.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+之后, reload一下systemd:
+```shell
+sudo systemctl daemon-reload
+sudo systemctl enable --now fan-control
 ```
 
 ## GPU驱动

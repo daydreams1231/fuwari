@@ -18,7 +18,7 @@ Zram 和 Swap 相辅相成, 都属于交换内存, 可以同时使用, 也可以
 :::info
 cat /proc/sys/vm/swappiness: 该值决定了系统在内存不足时, 选择使用交换空间的倾向程度. 值越大, 越倾向于使用交换空间.
 :::
-## ZRAM
+### ZRAM
 一般设备(ram <= 8GiB)首选ZRAM, 大于8G的设备一般不需要SWAP/ZRAM. <br>
 如果用了Zram后内存还是不足, 请考虑Swap <br>
 > 使用ZRAM需要内核配置了: CONFIG_ZRAM=m CONFIG_ZSMALLOC=y <br>
@@ -35,20 +35,22 @@ nano /etc/default/zramswap
 sudo zramctl
 ```
 
-## SWAP
+### SWAP
 兼容性最好, 但性能与硬盘强相关, 并且会增加硬盘的写入磨损 <br>
 ```shell
 fallocate -l 1G /swap && chmod 600 /swap && mkswap /swap && swapon /swap && echo "/swap swap swap defaults 0 0" >> /etc/fstab
 ```
 
-## SWAP + ZRAM
+### SWAP + ZRAM
 ```text title="/etc/fstab"
 /dev/zram0  none    swap    defaults,priority=100   0   0
 /swap       none    swap    defaults,priority=10    0   0
 ```
 
 # 安全弹出硬盘
-> umount并不是安全弹出, 它只是取消挂载, 但设备实际还是能被访问的 <br>
+:::warning
+umount并不是安全弹出, 它只是取消挂载, 但设备实际还是能被访问的 <br>
+:::
 
 ```shell
 # 使用gio命令. Doc: https://manpages.debian.org/testing/libglib2.0-bin/gio.1.en.html
@@ -64,22 +66,26 @@ sudo apt install udisks2
 udisksctl power-off -b /dev/sda
 ```
 
-# 检查磁盘坏块
+# 检查机械硬盘的坏块
 ```shell
 badblocks -s -v -o /root/bb.log /dev/sdb
 ```
-# 检查磁盘
+
+# 检查文件系统
 ```shell
 fsck -a /dev/sdb
 ```
+
 # 查看WiFi AP的mac:
 ```shell
 sudo iw dev wlan0 link
 ```
+
 # 查看周围WLAN (需要NetworkManager)
 ```shell
 nmcli dev wifi list
 ```
+
 # 磁盘读写测速
 ```shell
 sudo dd if=/dev/zero of=temp.bin bs=1M count=1024 status=progress oflag=direct <br>
@@ -204,21 +210,6 @@ apt在某个版本后自带https支持, 但还是最好安装如下软件包
 ```shell
 sudo apt install apt-transport-https ca-certificates --reinstall
 ```
-
-# 换内核
-```shell
-# 注意启用Backport源
-sudo apt update
-sudo apt search linux-image
-# 找同一个版本的linux-headers和linux-image, 根据平台选择对应的后缀内核, 或者无后缀的通用内核
-# 推荐只安装linux-headers, 让apt自动处理依赖, 且安装完后应该会自动运行update-grub
-sudo apt install linux-headers-XXX
-# 如果上一步没自动运行update-grub, 手动运行
-sudo update-grub
-# 安装重启完后清理
-sudo apt autoremove
-```
-新版内核一般是带ntfs3驱动的, 不过是以Module形式存在
 
 # debian换源 & 更新
 Debian官方对不同类型源的定义: [Here](https://wiki.debian.org/SourcesList) <br>

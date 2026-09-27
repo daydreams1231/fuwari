@@ -404,7 +404,7 @@ WantedBy=multi-user.target default.target
 ```
 
 ## Aria2
-由于镜像没对下载的文件做校验, 在国内经常下载到不完整的文件, 导致执行报错, 故推荐在创建容器前手动下载文件: <br>
+由于镜像没对下载的文件做校验, 在国内可能下载到不完整的文件, 导致后续执行报错, 故推荐在创建容器前手动下载文件: <br>
 ```shell wrap=false
 wget https://p3terx.github.io/aria2.conf/aria2.conf -O /root/config/aria2/aria2.conf
 wget https://p3terx.github.io/aria2.conf/script.conf -O /root/config/aria2/script.conf
@@ -493,12 +493,6 @@ Restart=no
 
 [Install]
 WantedBy=multi-user.target default.target
-```
-
-## Watchtower (容器自动更新)
-86400秒 = 1天
-```shell
-docker run -d --name watchtower --restart unless-stopped --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --cleanup --interval 86400
 ```
 
 ## LibreSpeed内网测速

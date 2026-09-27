@@ -25,10 +25,8 @@ lang: ''
 ## ignore automatically obtained routes:
 忽略自动获取的默认路由, 不影响局域网路由，不影响手动配置的路由 <br>
 google上说该选项启动后会影响接口的所有路由，因此要手动配置默认和非默认路由 <br>
-但我在debian11和ubuntu24.04上实测下来还是会有局域网路由，idk, 慎用这个选项 <br>
+但我在debian11和ubuntu24.04上实测下来还是会有局域网路由, idk, 慎用这个选项 <br>
 
 # Available to all users
 同义: 此连接对其他用户可用 <br>
-用于控制其他用户能否修改这个连接, 比如改DNS之类的 <br>
-这个我没试过 <br>
-
+用于控制其他用户能否修改这个连接, 比如改DNS之类的, 保持默认关闭即可 <br>

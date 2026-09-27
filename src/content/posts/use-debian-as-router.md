@@ -19,16 +19,11 @@ lang: ''
 对于TCP连接, 可使用Tun, TProxy, Redirect三种方式, 其中最先进, 性能最高的是TProxy <br>
 对于UDP连接, 可使用Tun, TProxy. <br>
 
-下文统一使用TProxy处理TCP + UDP, 不劫持任何udp/53上的DNS, 但其他DNS请求会进一遍内核, 由配置文件决定处理操作 <br>
-国内流量可选绕过内核 <br>
-如果你没有IPv6, 或者你是用在旁路由上(即你无法指定局域网的IPv6网关), 可在如下配置中删去IPv6相关的部分 <br>
-如果需要代理本机产生的流量, 下文统一使用 gid 的方式来绕过clash本身产生的流量, 防止重复代理.
-如果你不需要代理本机产生的流量, 下面的gid配置相关的部分可以不做 <br>
+下文统一采用TProxy处理TCP + UDP, 不劫持经过设备的DNS请求, 国内流量绕过内核(可选) <br>
 
-## 添加用户
-```shell
-echo "clash:x:0:250:::/usr/sbin/nologin" >> /etc/passwd
-```
+不代理本机流量, 即只代理局域网的请求和docker bridge容器的请求, 该功能根据需要自行取舍 <br>
+
+如果你没有IPv6, 或者你是用在旁路由上(即你无法指定局域网的IPv6网关), 可在配置中删去IPv6相关的部分 <br>
 
 ## 开启IP转发
 在OpenWrt等系统上这步可省略
@@ -55,11 +50,10 @@ sysctl -p
 ```shell
 iptables -V
 # 如果输出: iptables x.x.x (nf_tables), 代表系统使用nftables, 否则使用iptables
+
+# 如果 iptables 和 nft 命令都能使用, 代表该系统同时使用两种数据包过滤系统, 具体用哪种自行取舍
 ```
----
-以下所有命令都需要在docker修改系统路由前执行, 以防止某些Bug
-以后再看能否fix this
----
+
 ## iptables实现 (适用于老系统)
 ```shell
 # 让设备具有简单的路由NAT功能 (eth0为设备上网的接口, 自行改为对应接口, 不会的看本文末尾QA)
@@ -123,7 +117,7 @@ iptables -t mangle -A clash -p udp -j TPROXY --on-ip 127.0.0.1 --on-port 7894 --
 ip6tables -t mangle -A clash -p tcp -j TPROXY --on-ip ::1 --on-port 7894 --tproxy-mark 1
 ip6tables -t mangle -A clash -p udp -j TPROXY --on-ip ::1 --on-port 7894 --tproxy-mark 1
 
-# 让打了标的流量进入INPUT链 TProxy Mark和常规Mark都算
+# 让打了标的流量进入INPUT链, TProxy Mark和常规Mark都算
 ip rule add fwmark 1 table 100 priority 30000
 ip route add local 0.0.0.0/0 dev lo table 100
 ip -6 rule add fwmark 1 table 100 priority 30000
@@ -131,34 +125,33 @@ ip -6 route add local ::/0 dev lo table 100
 
 # 以上是代理局域网设备的, 为了实现代理本机流量, 需要额外操作:
 # 由于本机上网流量直接进入OUTPUT链, 后经POST Routing发出, 所以可在 OUTPUT 链对数据包打标记, 让相应的包重路由到 PREROUTING 链上
-# 要求: DNS请求以及DST为内网IP的永远直连, 不要重定向
-# 代理本机流量有两者方法, 1是过滤指定标记的数据包, 这种方法需要你的代理软件能设置出站流量的数据包标记, 主流软件都支持
-# 第二种是gid方案, 让clash以特定uid gid运行, 再在iptables配置指定gid的流量其OUTPUT直连
-## 方法1: 打标 (clash对应routing-mark: 255) ipv6类似, 这里省略了
 iptables -t mangle -N clash_self
 iptables -t mangle -A clash_self -p udp --dport 53 -j RETURN
 iptables -t mangle -A clash_self -m set --match-set localnetwork4 dst -j RETURN
+iptables -t mangle -A clash_self -m set --match-set cn_ipv4 dst -j RETURN
+
+## 方法1: 打标, 过滤指定标记的数据包, 这种方法需要你的代理软件能设置出站流量的数据包标记, 主流软件都支持 (clash对应routing-mark: 255) ipv6类似, 这里省略了
 iptables -t mangle -A clash_self -j RETURN -m mark --mark 0xff # 0xff即255的十六进制
 iptables -t mangle -A clash_self -j MARK --set-mark 1
 iptables -t mangle -A OUTPUT -j clash_self
-## 方法2: gid过滤
-iptables -t mangle -N clash_self
-iptables -t mangle -A clash_self -p udp --dport 53 -j RETURN
-iptables -t mangle -A clash_self -m set --match-set localnetwork4 dst -j RETURN
-iptables -t mangle -A clash_self -j MARK --set-mark 1
+
+## 方法2: gid过滤, 让clash以特定uid gid运行, 再在iptables配置指定gid的流量其OUTPUT直连
 ## 新建clash用户, 专门运行clash软件, uid=0, gid=250的用户 (如果不想uid=0, 那在启动clash时要给予CAP_NET_ADMIN权限)
 ## 只有Clash发出的流量能直接OUTPUT, 其余流量进入clash_self子链
 iptables -t mangle -A OUTPUT -m owner ! --gid-owner 250 -j clash_self
+iptables -t mangle -A clash_self -j MARK --set-mark 1
 ```
 
 ---
 
-## nftables实现 (现代系统方案)
+## nftables实现
 nftables天生就支持ip集合功能, 并且可以一条规则同时匹配IPv4 + IPv6, 免去了近一半操作, 非常好用 <br>
 而且, 若ip集合发生变化, nftables能自动处理, 不需要重配路由 <br>
 nftables还允许以脚本的形式自动处理规则, 不需要像iptables那样一条一条敲命令. <br>
 
-:::tip
+> 演示使用 gid 的方式过滤数据包, 若需要匹配特定标记的方式过滤, 自行更换nft命令即可
+
+:::tips
 nft中, inet/ip/ip6类型表的优先级对应表:
   - raw     -300
   - mangle  -150
@@ -167,6 +160,7 @@ nft中, inet/ip/ip6类型表的优先级对应表:
   - security    50
   - srcnat  100
 :::
+
 ```shell title=change_fw.nft
 #!/usr/sbin/nft -f
 # 指定出口网卡
@@ -202,17 +196,12 @@ table inet clash {
         type ipv6_addr
         flags interval
     }
-    # flow offload, 这里可能还需要更改一下
-    # flowtable ft {
-    #     hook ingress priority 0;
-    #     devices = { eth0 };
-    # }
+
     chain allow_forward {
         # 链的type可以为filter, nat, route, 各自能hook的对象不同, 如果你不知道要选哪种就选filter
         # hook的对象只能是prerouting, forward, postrouting, input, output中一种
         # 优先级 priority只对hook对象相同的所有链生效, 如果不同链都hook了不同的对象, 那优先级无作用
         type filter hook forward priority 0; policy accept;
-        # ip protocol { tcp, udp } flow offload @ft
         ct state established,related accept
     }
 
@@ -221,6 +210,7 @@ table inet clash {
         oifname $out_interface masquerade
         # 如果有多个上网口, 最终具体走哪个口由路由表决定
     }
+
     # chain的定义中如果有type xxx hook xxx, 表示这是一个基本链, 否则是常规链
     # 在基本链中, return 就相当于该基本链的默认策略
     # 在常规链中, return从常规链返回, 回到调用该常规链的上一个链中继续匹配
@@ -251,56 +241,66 @@ table inet clash {
 
 ```
 ### NFT配套脚本
-这个脚本在change_fw.nft执行后运行, 用于向ip集合中添加IP <br>
+这个脚本在change_fw.nft执行后运行, 用于向ip集合中添加IP, 以及修改路由 <br>
 
-:::tip
+:::tips
 ip route显示默认路由表(main路由表) <br>
 ip route show table xxx, 显示xxx路由表 <br>
 
 ip rule 显示系统当前的路由策略/规则, 显示的内容是所有 ip rule show table xxx 的合集 <br>
 输出结果中, lookup local代表查找local路由表, 同时也表示该行规则属于local路由表 <br>
 :::
-```shell title=before_start.sh
+
+```shell title=env-setup.sh
 #!/bin/bash
 
-# 添加国内IP, OpenClash同款源
-(echo "add element inet clash geoip_cn_ipv4 {"; curl -s https://ispip.clang.cn/all_cn.txt | sed 's/$/,/'; echo "}") | nft -f -
-(echo "add element inet clash geoip_cn_ipv6 {"; curl -s https://ispip.clang.cn/all_cn_ipv6.txt | sed 's/$/,/'; echo "}") | nft -f -
+USE_IPV4=1
+USE_IPV6=1
+
+# 检查用户是否为root, 否则退出
+if [ "$(id -u)" -ne 0 ]; then
+    echo "请以root用户运行此脚本"
+    exit 1
+fi
+
+if [ -f /etc/openwrt_release ]; then
+    CURL_DNS_OPTS=""
+else
+    CURL_DNS_OPTS="--dns-servers 223.5.5.5"   # 非 OpenWrt 系统使用的 DNS，请按需修改
+fi
+
+if [ "$1" = "start" ]; then
+    if [ $USE_IPV4 -eq 1 ]; then
+        ip rule del fwmark 1 table 100 >/dev/null 2>&1
+        ip rule add fwmark 1 table 100 priority 30000
+        ip route del local 0.0.0.0/0 dev lo table 100 >/dev/null 2>&1
+        ip route add local 0.0.0.0/0 dev lo table 100
+        (echo "add element inet clash geoip_cn_ipv4 {"; curl -s $CURL_DNS_OPTS https://ispip.clang.cn/all_cn.txt | sed 's/$/,/'; echo "}") | nft -f -
+    fi
+    if [ $USE_IPV6 -eq 1 ]; then
+        ip -6 rule del fwmark 1 table 100 >/dev/null 2>&1
+        ip -6 rule add fwmark 1 table 100 priority 30000
+        ip -6 route del local ::/0 dev lo table 100 >/dev/null 2>&1
+        ip -6 route add local ::/0 dev lo table 100
+        (echo "add element inet clash geoip_cn_ipv6 {"; curl -s $CURL_DNS_OPTS https://ispip.clang.cn/all_cn_ipv6.txt | sed 's/$/,/'; echo "}") | nft -f -
+    fi
+    echo "startup done"
+else
+    if [ $USE_IPV4 -eq 1 ]; then
+        ip rule del fwmark 1 table 100
+        ip route del local 0.0.0.0/0 dev lo table 100
+    fi
+    if [ $USE_IPV6 -eq 1 ]; then
+        ip -6 rule del fwmark 1 table 100
+        ip -6 route del local ::/0 dev lo table 100
+    fi
+    echo "shutdown complete"
+fi
 
 exit 0
 ```
-systemd service
-```
-[Service]
-Type=exec
-User=clash
-ExecStartPre=/root/config/clash/change_firewall.nft
-ExecStartPre=ip rule add fwmark 1 table 100 priority 30000
-ExecStartPre=ip route add local 0.0.0.0/0 dev lo table 100
-ExecStartPre=ip -6 rule add fwmark 1 table 100 priority 30000
-ExecStartPre=ip -6 route add local ::/0 dev lo table 100
-ExecStartPre=/root/config/clash/before_start.sh
-ExecStart=/root/config/clash/mihomo-linux-arm64 -f /home/radxa/clash/clash.yaml -d /root/config/clash
-ExecStop=/bin/kill $MAINPID
-ExecStopPost=nft delete table inet clash
-ExecStopPost=ip rule del fwmark 1 table 100
-ExecStopPost=ip route del local 0.0.0.0/0 dev lo table 100
-ExecStopPost=ip -6 rule del fwmark 1 table 100
-ExecStopPost=ip -6 route del local ::/0 dev lo table 100
-Restart=on-failure
-```
 
-:::tip
-start = ExecStartPre + ExecStart
-stop = ExecStop + ExecStopPost
-restart = stop + start
-:::
-
-:::warn
-在安装了Docker的系统上, 如果docker使用nftables, 并且docker在clash.service之前运行, docker先添加的防火墙会让后添加的clash防火墙无法正常运行 <br>
-直接表现就是断网, 要解决该问题, 需要想办法让clash在docker之前运行, 即在clash.service文件的[Unit]部分添加 `Before=docker.service`
-:::
-## 使用Tun处理TCP与UDP流量(Redir TCP + TUN UDP)
+## 使用Tun处理TCP与UDP流量(Redir TCP + TUN UDP) (未验证)
 如果你的设备内核比较老, 或者是那种阉割了一堆功能的内核, 你还改不了的那种, 可以试一试Tun设备方案 <br>
 该方案同样需要内核配置启用了tun设备, 如果没有, 建议换设备
 ```shell
@@ -326,8 +326,97 @@ restart = stop + start
 # 在关闭auto-route后, dns劫持不再生效, clash只会创建tun接口, 要自己配置iptables
 ```
 
+## 安装示例
+### Debian
+在debian等系统上, 使用 systemd 来控制程序的运行. 编写的service文件如下:
+```text
+[Unit]
+Description=clash service
+After=network-online.target
+
+[Service]
+Type=simple
+User=clash
+LimitNOFILE=65535
+ExecStartPre=/root/config/clash/change_firewall.nft
+ExecStartPre=/root/config/clash/env-setup.sh start
+ExecStart=/root/config/clash/mihomo-linux-arm64 -f /home/radxa/clash/clash.yaml -d /root/config/clash
+ExecStop=/bin/kill $MAINPID
+ExecStopPost=nft delete table inet clash
+ExecStopPost=/root/config/clash/env-setup.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+:::warn
+在安装了Docker的系统上, 如果docker使用nftables, 并且docker在clash.service之前运行, docker先添加的防火墙会让后添加的clash防火墙无法正常运行 <br>
+直接表现就是断网, 要解决该问题, 需要想办法让clash在docker之前运行, 即在clash.service文件的[Unit]部分添加 `Before=docker.service`
+:::
+
+### OpenWRT
+Openwrt类系统使用init.d来管理程序运行, 出于维护目的(方便随时查看日志), 使用一个脚本来启动:
+```shell
+#!/bin/sh
+
+export HOME=/root
+export USER=root
+export LOGNAME=root
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export SCREENDIR=/tmp/screen-root
+
+mkdir -p "$SCREENDIR"
+chmod 700 "$SCREENDIR"
+
+# 出口网络接口
+INTERFACE="br-lan"
+
+# 1. 检查网络连接
+echo "正在检查网络 ($INTERFACE -> 223.5.5.5)..."
+while true; do
+    # ping 5次，grep 检查是否为 0% packet loss 确保全部通畅
+    if ping -c 5 -I $INTERFACE 223.5.5.5 | grep -q "0% packet loss"; then
+        echo "网络已就绪，开始配置..."
+        break
+    else
+        echo "网络未完全通畅，等待 5 秒后重试..."
+        sleep 5
+    fi
+done
+
+# 2. 检查并删除已有的 nft inet clash 表
+if nft list table inet clash >/dev/null 2>&1; then
+    echo "发现旧的 nft clash 表，正在删除..."
+    nft delete table inet clash
+fi
+
+# 3. 执行本地 nft 脚本
+if [ -f "/root/clash/change_fw.nft" ]; then
+    echo "执行 nft 脚本: change_fw.nft"
+    nft -f /root/clash/change_fw.nft
+else
+    echo "警告: /root/clash/change_fw.nft 不存在, clash启动终止。"
+    exit 1
+fi
+
+echo "执行 env-setup.sh"
+sh /root/config/clash/env-setup.sh start
+
+screen -wipe >/dev/null 2>&1
+
+echo "正在后台启动 Xray 进程..."
+screen -dmS xray /root/xray/xray run -c=/root/xray/xray_sample.json
+
+sleep 1
+
+echo "正在后台启动 Mihomo 进程..."
+screen -dmS clash /root/clash/mihomo-linux-arm64 -f /root/clash/clash.yaml -d /root/clash
+
+echo "脚本执行完毕！"
+```
+
 ## Q & A
-### 创建uid=0, gid=250的用户
+### 如何创建uid=0, gid=250的用户
 ```shell
 # 创建250号组, 名字为clash
 sudo groupadd -g 250 clash
@@ -356,7 +445,7 @@ iptables对数据包只能ACCEPT DROP RETURN或者跳转到子链继续匹配 <b
 
 tproxy端口最好只监听127.0.0.1 和 ::1, 防止流量被盗
 
-:::tip
+:::tips
 tproxy打标这一步不会更改数据包目标IP和端口, 它是通过在数据包上添加特定标记实现的路由重定向
 :::
 
@@ -370,51 +459,16 @@ TProxy打标不会触发数据包重路由, mark常规打标会.
 Tproxy不会修改数据包的目标, 而Redirect会
 
 ### DNS
-在系统启动时, 由于要联网以下载geoip, 如果此时DNS填127.0.0.1, 会因clash还未启动, 无法提供DNS服务, 导致无法下载geoip
-解决方法: 系统启动时就用dhcp获取的DNS, 等clash运行后再执行覆盖命令.
+在系统启动时, 为了实现绕过中国IP的功能, 必须要联网以下载相关数据, 若此时DNS填127.0.0.1, 会因clash还未启动, 无法提供DNS服务, 导致下载失败 <br>
+解决方法也很简单, 让curl下载中国IP时, /etc/resolv.conf里的DNS为可用的DNS即可. 
+在Openwrt上, 系统启动时会把/etc/resolv.conf强制设为127.0.0.1, 故只需在启动脚本里备份一下resolv.conf文件, 写入公共DNS, 在下载完数据后再写回去即可(可选).
+在Debian上, 直接使用curl --dns-servers参数指定DNS即可.
 
-dhcp dns支持情况:
-  - 使用NetworkManager: NetworkManager会在启动后填DHCP获取的DNS或者自己设置的DNS到/etc/resolv.conf, 已在debian13 rootfs上验证.
-  - netplan + NetworkManager-backend: 常见于ubuntu, 无论怎么设置都不会去动/etc/resolv.conf, 全权由自己控制. 即使在/run/NetworkManager/system-connection下面的配置文件中或者nmtui配置了DNS. 已在ubuntu 24.04上验证
-  - netplan + systemd-networkd-backend: 常见于armbian-minimal系统
-
-实测, 如果直接添加如下文本, nm有时会因网络延迟导致clash.service先写dns, 后nm再覆盖DNS
-ExecStartPre=echo "nameserver 127.0.0.1" > /etc/resolv.conf
-解决方法: 再加一行sleep到这一行之前, 这样做后大概率是NM先写DNS, clash再写DNS
-
-:::TIPS
-netplan指定NM为后端时, 生成的配置文件在: /run/NetworkManager/system-connections <br>
-nmtui指定的配置, 保存在: /etc/NetworkManager/system-connections
+:::info
+尽管 curl 支持 --dns-servers 选项, 但实测Openwrt上无法使用
 :::
 
 ### IPV6
 各大主流系统内修改的网关只针对于IPV4生效, 但windows把ipv4和ipv6分开设置了
-要想实现旁路由, 就必须把ipv6网关也指向旁路由, 在这些不能修改ipv6网关的设备上, 只能在主路由处配置dhcpv6, 把特定设备分配特定的ipv6网关
-并且ipv6网关地址要能随拨号前缀而变化
-
-或者, 使用本地链路地址fe80 ?
-
-## 中转服务器搭建
-部分VPS线路太烂, 只能通过中转使用 <br>
-而且国内VPS价格还算不错, 最差的阿里云也有99一年3M, 不限流量, 这个应急用下还是可以的, 防止失联 <br>
-
-xray tun转发:
-根据xray会监听5600端口, 猜测其是应用层转发, 按理说应该没效果的, 毕竟TLS协商在这之前
-但使用v2rayN实测发现, 转发到RN时, 支持TCP/UDP, 转发到KR时, 只能UDP, TCP需要特定的指纹才能连上
-使用clash, 无论什么指纹, 都无法使用基于TCP的协议
-
-使用三层转发时:
-```shell
-echo 1 > /proc/sys/net/ipv4/ip_forward
-
-# TCP流量处理
-iptables -t nat -A PREROUTING -i ens5 -p tcp --dport 5600 -j DNAT --to-destination 43.155.173.61:443
-iptables -t nat -A POSTROUTING -o ens5 -p tcp -d 43.155.173.61 --dport 443 -j MASQUERADE
-
-# UDP流量处理
-iptables -t nat -A PREROUTING -i ens5 -p udp --dport 5600 -j DNAT --to-destination 43.155.173.61:443
-iptables -t nat -A POSTROUTING -o ens5 -p udp -d 43.155.173.61 --dport 443 -j MASQUERADE
-```
-不清楚为何指纹选chrome时才能用, 别的不行, 这情况和Tun转发类似
-选别的指纹时, 发送client hello, 中转VPS会直接回复 RST
-而clash无论选什么都会回复tcp rst
+要想实现ipv6旁路由, 就必须把ipv6网关也指向旁路由, 在这些不能修改ipv6网关的设备上, 只能在主路由处配置dhcpv6, 把特定设备分配特定的ipv6网关, 但这样为何不直接用主路由呢?
+如果不改ipv6网关, 若域名解析到IPv6地址, 那它一定是直连的.
