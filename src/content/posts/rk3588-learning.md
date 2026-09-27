@@ -208,7 +208,6 @@ awk '{printf ("%0.2f\n",$1/172.5); }' </sys/devices/iio_sysfs_trigger/subsystem/
 ```
 
 ## 风扇
-
 Rock5B的风扇不是常规意义上的PWM风扇, 而是一个普通的双线风扇, 一般PWM风扇内会有一个PWM控制器, 由系统通过PWM信号控制风扇转速, 而Rock5B的风扇则是直接接在GPIO上, 通过PWM控制GPIO的电压大小来控制风扇速度, 类似于PWM风扇 <br>
 
 [Radxa Wiki](https://docs.radxa.com/rock5/rock5b/getting-started/interface-usage/fan) <br>
@@ -223,7 +222,10 @@ FAN_SPEED_NUMBER取值范围为0-255, 0为风扇停止, 255为全速, 其他数�
 但需注意, 其值与风扇强相关, 同一个值在不同的风扇上可能会有不同的效果 <br>
 :::
 
-假设你的风扇在0-255范围内, 均有不同的转速, 即理想情况, 可通过用户脚本来实现温控:
+一般, 内核已配置了该PWM风扇控速策略为step-wise, 如需手动更改, 前往 /sys/class/thermal/ 查找对应风扇设备, 更改 policy 即可
+
+
+如果要在用户空间控制风扇, 需先确保PWM策略为 user space, 后:
 ```shell
 #!/bin/bash
 
